@@ -116,7 +116,6 @@ class TextVideoDataset(torch.utils.data.Dataset):
         return len(self.path)
 
 
-
 class LightningModelForDataProcess(pl.LightningModule):
     def __init__(self, text_encoder_path, vae_path, image_encoder_path=None, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
         super().__init__()
@@ -150,7 +149,6 @@ class LightningModelForDataProcess(pl.LightningModule):
             torch.save(data, path + ".tensors.pth")
 
 
-
 class TensorDataset(torch.utils.data.Dataset):
     def __init__(self, base_path, metadata_path, steps_per_epoch):
         metadata = pd.read_csv(metadata_path)
@@ -173,7 +171,35 @@ class TensorDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.steps_per_epoch
+    
+    
+class DummyTensorDataset(torch.utils.data.Dataset):
+    def __init__(self, steps_per_epoch=100):
+        # metadata = pd.read_csv(metadata_path)
+        # self.path = [os.path.join(base_path, "train", file_name) for file_name in metadata["file_name"]]
+        # print(len(self.path), "videos in metadata.")
+        # self.path = [i + ".tensors.pth" for i in self.path if os.path.exists(i + ".tensors.pth")]
+        # print(len(self.path), "tensors cached in metadata.")
+        # assert len(self.path) > 0
+        
+        self.steps_per_epoch = steps_per_epoch
 
+
+    def __getitem__(self, index):
+        # data_id = torch.randint(0, len(self.path), (1,))[0]
+        # data_id = (data_id + index) % len(self.path) # For fixed seed.
+        # path = self.path[data_id]
+        # data = torch.load(path, weights_only=True, map_location="cpu")
+        data = {
+            'prompt_emb': {'context': torch.randn(1, 512, 4096)},
+            'latents': torch.randn(16, 20, 60, 104), # z = [b,c,t,h,w]
+            'image_emb': {},
+        }
+        return data
+    
+
+    def __len__(self):
+        return self.steps_per_epoch
 
 
 class LightningModelForTrain(pl.LightningModule):
@@ -207,6 +233,16 @@ class LightningModelForTrain(pl.LightningModule):
             )
         else:
             self.pipe.denoising_model().requires_grad_(True)
+        
+        ## Freeze self_attn parameters
+        for name, param in self.pipe.denoising_model().named_parameters():
+            if 'self_attn' in name:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+        for name, param in self.pipe.denoising_model().named_parameters():
+            print(name, param.shape, param.requires_grad)
         
         self.learning_rate = learning_rate
         self.use_gradient_checkpointing = use_gradient_checkpointing
@@ -525,6 +561,7 @@ def data_process(args):
         tile_size=(args.tile_size_height, args.tile_size_width),
         tile_stride=(args.tile_stride_height, args.tile_stride_width),
     )
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices="auto",
@@ -534,9 +571,12 @@ def data_process(args):
     
     
 def train(args):
-    dataset = TensorDataset(
-        args.dataset_path,
-        os.path.join(args.dataset_path, "metadata.csv"),
+    # dataset = TensorDataset(
+    #     args.dataset_path,
+    #     os.path.join(args.dataset_path, "metadata.csv"),
+    #     steps_per_epoch=args.steps_per_epoch,
+    # )
+    dataset = DummyTensorDataset(
         steps_per_epoch=args.steps_per_epoch,
     )
     dataloader = torch.utils.data.DataLoader(
