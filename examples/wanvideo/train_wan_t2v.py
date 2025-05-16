@@ -312,8 +312,8 @@ class LightningModelForTrain(pl.LightningModule):
         timestep_id = torch.randint(0, self.pipe.scheduler.num_train_timesteps, (1,))
         timestep = self.pipe.scheduler.timesteps[timestep_id].to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
         
-        # Simply use UV latents as extra input
-        extra_input = uv_latents
+        # Format UV latents as extra input dictionary
+        extra_input = {"extra_input": uv_latents}
         
         noisy_latents = self.pipe.scheduler.add_noise(latents, noise, timestep)
         training_target = self.pipe.scheduler.training_target(latents, noise, timestep)
