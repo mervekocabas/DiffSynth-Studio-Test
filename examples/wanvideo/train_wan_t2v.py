@@ -14,9 +14,17 @@ import numpy as np
 class TextVideoDataset(torch.utils.data.Dataset):
     def __init__(self, base_path, metadata_path, max_num_frames=81, frame_interval=1, num_frames=81, height=480, width=832, is_i2v=False):
         metadata = pd.read_csv(metadata_path)
+        # Regular video paths
         self.path = [os.path.join(base_path, "train", file_name) for file_name in metadata["file_name"]]
+        # UV video paths - replace 'train' with 'train_uv' and add '_uv.mp4' suffix
+        self.uv_path = []
+        for file_name in metadata["file_name"]:
+            base_name = os.path.splitext(file_name)[0]  # Remove extension
+            uv_file = f"{base_name}_uv.mp4"  # Add _uv.mp4
+            self.uv_path.append(os.path.join(base_path, "train_uv", uv_file))
+            
         self.text = metadata["text"].to_list()
-      
+        
         self.max_num_frames = max_num_frames
         self.frame_interval = frame_interval
         self.num_frames = num_frames
@@ -98,17 +106,38 @@ class TextVideoDataset(torch.utils.data.Dataset):
     def __getitem__(self, data_id):
         text = self.text[data_id]
         path = self.path[data_id]
+        uv_path = self.uv_path[data_id]
+
+        # Load regular video
         if self.is_image(path):
             if self.is_i2v:
                 raise ValueError(f"{path} is not a video. I2V model doesn't support image-to-image training.")
             video = self.load_image(path)
         else:
             video = self.load_video(path)
+
+        # Load UV video
+        if self.is_image(uv_path):
+            uv_video = self.load_image(uv_path)
+        else:
+            uv_video = self.load_video(uv_path)
+        
         if self.is_i2v:
             video, first_frame = video
-            data = {"text": text, "video": video, "path": path, "first_frame": first_frame}
+            data = {
+                "text": text, 
+                "video": video, 
+                "uv_video": uv_video,  # Add UV video
+                "path": path, 
+                "first_frame": first_frame
+            }
         else:
-            data = {"text": text, "video": video, "path": path}
+            data = {
+                "text": text, 
+                "video": video, 
+                "uv_video": uv_video,  # Add UV video
+                "path": path
+            }
         return data
     
 
