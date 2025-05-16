@@ -16,7 +16,7 @@ class TextVideoDataset(torch.utils.data.Dataset):
         metadata = pd.read_csv(metadata_path)
         self.path = [os.path.join(base_path, "train", file_name) for file_name in metadata["file_name"]]
         self.text = metadata["text"].to_list()
-        import ipdb;ipdb.set_trace()
+      
         self.max_num_frames = max_num_frames
         self.frame_interval = frame_interval
         self.num_frames = num_frames
