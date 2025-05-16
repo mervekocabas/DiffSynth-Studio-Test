@@ -296,6 +296,8 @@ class LightningModelForTrain(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # Data
         latents = batch["latents"].to(self.device)
+        # Get UV latents
+        uv_latents = batch["uv_latents"].to(self.device)
         prompt_emb = batch["prompt_emb"]
         prompt_emb["context"] = prompt_emb["context"][0].to(self.device)
         image_emb = batch["image_emb"]
@@ -309,7 +311,10 @@ class LightningModelForTrain(pl.LightningModule):
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.pipe.scheduler.num_train_timesteps, (1,))
         timestep = self.pipe.scheduler.timesteps[timestep_id].to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
-        extra_input = self.pipe.prepare_extra_input(latents)
+        
+        # Simply use UV latents as extra input
+        extra_input = uv_latents
+        
         noisy_latents = self.pipe.scheduler.add_noise(latents, noise, timestep)
         training_target = self.pipe.scheduler.training_target(latents, noise, timestep)
 
