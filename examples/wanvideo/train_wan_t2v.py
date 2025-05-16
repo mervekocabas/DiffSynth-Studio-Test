@@ -158,15 +158,18 @@ class LightningModelForDataProcess(pl.LightningModule):
         self.tiler_kwargs = {"tiled": tiled, "tile_size": tile_size, "tile_stride": tile_stride}
         
     def test_step(self, batch, batch_idx):
-        text, video, path = batch["text"][0], batch["video"], batch["path"][0]
+        text, video, uv_video, path = batch["text"][0], batch["video"], batch["uv_video"], batch["path"][0]
         
         self.pipe.device = self.device
-        if video is not None:
+        if video is not None and uv_video is not None:
             # prompt
             prompt_emb = self.pipe.encode_prompt(text)
             # video
             video = video.to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
             latents = self.pipe.encode_video(video, **self.tiler_kwargs)[0]
+            # uv video
+            uv_video = uv_video.to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
+            uv_latents = self.pipe.encode_video(uv_video, **self.tiler_kwargs)[0]
             # image
             if "first_frame" in batch:
                 first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
@@ -174,7 +177,12 @@ class LightningModelForDataProcess(pl.LightningModule):
                 image_emb = self.pipe.encode_image(first_frame, None, num_frames, height, width)
             else:
                 image_emb = {}
-            data = {"latents": latents, "prompt_emb": prompt_emb, "image_emb": image_emb}
+            data = {
+                "latents": latents,
+                "uv_latents": uv_latents,  # Add UV latents
+                "prompt_emb": prompt_emb,
+                "image_emb": image_emb
+            }
             torch.save(data, path + ".tensors.pth")
 
 
@@ -201,36 +209,6 @@ class TensorDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.steps_per_epoch
     
-    
-class DummyTensorDataset(torch.utils.data.Dataset):
-    def __init__(self, steps_per_epoch=100):
-        # metadata = pd.read_csv(metadata_path)
-        # self.path = [os.path.join(base_path, "train", file_name) for file_name in metadata["file_name"]]
-        # print(len(self.path), "videos in metadata.")
-        # self.path = [i + ".tensors.pth" for i in self.path if os.path.exists(i + ".tensors.pth")]
-        # print(len(self.path), "tensors cached in metadata.")
-        # assert len(self.path) > 0
-        
-        self.steps_per_epoch = steps_per_epoch
-
-
-    def __getitem__(self, index):
-        # data_id = torch.randint(0, len(self.path), (1,))[0]
-        # data_id = (data_id + index) % len(self.path) # For fixed seed.
-        # path = self.path[data_id]
-        # data = torch.load(path, weights_only=True, map_location="cpu")
-        data = {
-            'prompt_emb': {'context': torch.randn(1, 512, 4096)},
-            'latents': torch.randn(16, 20, 60, 104), # z = [b,c,t,h,w]
-            'image_emb': {},
-        }
-        return data
-    
-
-    def __len__(self):
-        return self.steps_per_epoch
-
-
 class LightningModelForTrain(pl.LightningModule):
     def __init__(
         self,
@@ -605,9 +583,7 @@ def train(args):
          os.path.join(args.dataset_path, "metadata.csv"),
          steps_per_epoch=args.steps_per_epoch,
     )
-    #dataset = DummyTensorDataset(
-    #    steps_per_epoch=args.steps_per_epoch,
-    #)
+   
     dataloader = torch.utils.data.DataLoader(
         dataset,
         shuffle=True,
