@@ -593,14 +593,14 @@ def data_process(args):
     
     
 def train(args):
-    #dataset = TensorDataset(
-    #     args.dataset_path,
-    #     os.path.join(args.dataset_path, "metadata.csv"),
-    #     steps_per_epoch=args.steps_per_epoch,
-    #)
-    dataset = DummyTensorDataset(
+    dataset = TensorDataset(
+        args.dataset_path,
+        os.path.join(args.dataset_path, "metadata.csv"),
         steps_per_epoch=args.steps_per_epoch,
     )
+    #dataset = DummyTensorDataset(
+    #    steps_per_epoch=args.steps_per_epoch,
+    #)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         shuffle=True,
