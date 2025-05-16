@@ -98,17 +98,22 @@ class TextVideoDataset(torch.utils.data.Dataset):
     def __getitem__(self, data_id):
         text = self.text[data_id]
         path = self.path[data_id]
+        uv_path = path.replace("train", "train_uv").replace(".mp4", "_uv.mp4")
         if self.is_image(path):
             if self.is_i2v:
                 raise ValueError(f"{path} is not a video. I2V model doesn't support image-to-image training.")
             video = self.load_image(path)
+            uv_video = self.load_video(uv_path)
         else:
             video = self.load_video(path)
+            uv_video = self.load_video(uv_path)
         if self.is_i2v:
             video, first_frame = video
-            data = {"text": text, "video": video, "path": path, "first_frame": first_frame}
+            # uv video
+            data = {"text": text, "video": video, "uv_video": uv_video, "path": path, "first_frame": first_frame}
         else:
-            data = {"text": text, "video": video, "path": path}
+            # uv video
+            data = {"text": text, "video": video, "uv_video": uv_video, "path": path}
         return data
     
 
@@ -129,15 +134,19 @@ class LightningModelForDataProcess(pl.LightningModule):
         self.tiler_kwargs = {"tiled": tiled, "tile_size": tile_size, "tile_stride": tile_stride}
         
     def test_step(self, batch, batch_idx):
-        text, video, path = batch["text"][0], batch["video"], batch["path"][0]
+        text, video, uv_video, path = batch["text"][0], batch["video"], batch["uv_video"], batch["path"][0]
         
         self.pipe.device = self.device
-        if video is not None:
+        if video and uv_video is not None:
             # prompt
             prompt_emb = self.pipe.encode_prompt(text)
             # video
             video = video.to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
+            # uv video
+            uv_video = uv_video.to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
             latents = self.pipe.encode_video(video, **self.tiler_kwargs)[0]
+            # uv map latents
+            uv_latents = self.pipe.encode_video(uv_video, **self.tiler_kwargs)[0]
             # image
             if "first_frame" in batch:
                 first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
@@ -145,7 +154,8 @@ class LightningModelForDataProcess(pl.LightningModule):
                 image_emb = self.pipe.encode_image(first_frame, None, num_frames, height, width)
             else:
                 image_emb = {}
-            data = {"latents": latents, "prompt_emb": prompt_emb, "image_emb": image_emb}
+            # add uv map latents
+            data = {"latents": latents, "prompt_emb": prompt_emb, "image_emb": image_emb, "uv_latents": uv_latents}
             torch.save(data, path + ".tensors.pth")
 
 
@@ -194,6 +204,8 @@ class DummyTensorDataset(torch.utils.data.Dataset):
             'prompt_emb': {'context': torch.randn(1, 512, 4096)},
             'latents': torch.randn(16, 20, 60, 104), # z = [b,c,t,h,w]
             'image_emb': {},
+            # uv map latents
+            'uv_latents': torch.randn(16, 20, 60, 104), # uv = [b,c,t,h,w]
         }
         return data
     
@@ -289,6 +301,8 @@ class LightningModelForTrain(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # Data
         latents = batch["latents"].to(self.device)
+        # uv map latents
+        uv_latents = batch["uv_latents"].to(self.device)
         prompt_emb = batch["prompt_emb"]
         prompt_emb["context"] = prompt_emb["context"][0].to(self.device)
         image_emb = batch["image_emb"]
@@ -302,13 +316,21 @@ class LightningModelForTrain(pl.LightningModule):
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.pipe.scheduler.num_train_timesteps, (1,))
         timestep = self.pipe.scheduler.timesteps[timestep_id].to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
-        extra_input = self.pipe.prepare_extra_input(latents)
+        # uv map latents
+        #extra_input = self.pipe.prepare_extra_input(latents)
+        #extra_input = uv_latents
         noisy_latents = self.pipe.scheduler.add_noise(latents, noise, timestep)
         training_target = self.pipe.scheduler.training_target(latents, noise, timestep)
 
         # Compute loss
+        # uv map latents
+        #noise_pred = self.pipe.denoising_model()(
+        #    noisy_latents, timestep=timestep, **prompt_emb, **extra_input, **image_emb,
+        #    use_gradient_checkpointing=self.use_gradient_checkpointing,
+        #    use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload
+        #)
         noise_pred = self.pipe.denoising_model()(
-            noisy_latents, timestep=timestep, **prompt_emb, **extra_input, **image_emb,
+            noisy_latents, timestep=timestep, **prompt_emb, **uv_latents, **image_emb,
             use_gradient_checkpointing=self.use_gradient_checkpointing,
             use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload
         )
@@ -571,11 +593,11 @@ def data_process(args):
     
     
 def train(args):
-    # dataset = TensorDataset(
+    #dataset = TensorDataset(
     #     args.dataset_path,
     #     os.path.join(args.dataset_path, "metadata.csv"),
     #     steps_per_epoch=args.steps_per_epoch,
-    # )
+    #)
     dataset = DummyTensorDataset(
         steps_per_epoch=args.steps_per_epoch,
     )
